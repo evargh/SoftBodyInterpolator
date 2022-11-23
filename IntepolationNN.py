@@ -3,13 +3,12 @@ from torch import nn
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset
-from torchvision import datasets
-import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 
 import os
-import pandas as pd
-import numpy as np
+import pandas as pd # data processing with .csv
+import numpy as np # linear algebra if necessary?
+import gc
 from torchvision.io import read_image
 from torchvision.transforms import ToTensor
 
@@ -50,38 +49,14 @@ class AnimationSet(Dataset):
     def __getitem__(self, idx):
         path = os.path.join(self.data_folder)
         animation_folder = self.animations[idx]
-        #Access start frame, impact frame, and mass of ball
+        #Access start frame, impact frame, and mass of ball, use .csv to access
         start_frame = ToTensor(read_image(transforms.Resize(160, 90)(path+animation_folder+'\image_folder.csv')))
         impact_frame = ToTensor(read_image(transforms.Resize(160, 90)(path+animation_folder+'\impact_frames.csv')))
         mass = torch.full((160,90),path+animation_folder+'\animation_settings.csv')
         expected_frames = pd.read_csv(path+animation_folder+'\image_folder.csv')
         
         return impact_frame, start_frame, mass, expected_frames
-
-
-#Defining sets
-print(os.getcwd())
-#C:\Users\Alex\Desktop\ML Proj
-ls = os.getcwd()
-#Trains on 64 animation folders at a time
-batch_size = 64
-
-#Iterate over every folder in the working directory ls
-#Store all animation sets in animations array
-
-animation = AnimationSet(
-        data_folder = ls, #temporary, replace with actual working directory
-        data_folder_list = ls+'\animation_folders.csv'#Contains the list of animation folders
-    )
     
-
-train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
-test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-#Note to self, us tanh function instead of ReLu to prevent explosion to inf
-
 class CNNModelConv(nn.Module):
     def __init__(self):
         super(CNNModelConv, self).__init__()
@@ -98,18 +73,84 @@ class CNNModelConv(nn.Module):
 
     def forward(self, x):
         output = []
-        for i in 150
-            output = ?
 
 
         return output
+
+
+#Defining sets
+print(os.getcwd())
+#C:\Users\Alex\Desktop\ML Proj
+ls = os.getcwd()+'\Animations'
+
+#Trains on 64 animation folders at a time
+batch_size = 64
+
+#Iterate over every folder in the working directory ls
+#Store all animation sets in animations array
+
+animation = AnimationSet(
+        data_folder = ls, #temporary, replace with actual working directory
+        data_folder_list = ls+'\animation_list.csv'#Contains the list of animation folders
+    )
+    
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = CNNModelConv().to(device)
+optimizer = torch.optim.RMSprop(model.parameters, lr=1e-5)
+criterion = nn.MSELoss()
+
+train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
+test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
     
 def trainer():
-    for idx, #
-return stuff
+    #Default Trainer
+    model.train()
+    
+    for epoch in range(500):
+        running_loss = 0.0
+        for i, data in enumerate(train_dataloader, 0):
+            inputs, labels = data
+            inputs, labels = inputs.to(device), labels.to(device)
+    
+            # zero the parameter gradients
+            optimizer.zero_grad()
+    
+            # forward + backward + optimize
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+    
+            running_loss += loss.item()
+            gc.collect() #Garbage Collection
+    
+        print('Training Loss: {}'.format(running_loss))
+    print('Finished Training')
 
 def validation():
-    for idx, #
-return stuff
+    
+    model.eval()
+    with torch.no_grad():
+        for epoch in range(500):
+            running_loss = 0.0
+            for i, data in enumerate(test_dataloader, 0):
+                inputs, labels = data
+                inputs, labels = inputs.to(device), labels.to(device)
+        
+                # zero the parameter gradients
+                optimizer.zero_grad()
+        
+                # forward + backward + optimize
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
+        
+                running_loss += loss.item()
+                gc.collect() #Garbage Collection
+            print('Validation Loss: {}'.format(running_loss))
+            
+    print('Finished Validating')
+    
 
 
