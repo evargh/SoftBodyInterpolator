@@ -54,6 +54,7 @@ class AnimationSet(Dataset):
         impact_frame = ToTensor(read_image(transforms.Resize(160, 90)(path+animation_folder+'\impact_frames.csv')))
         mass = torch.full((160,90),path+animation_folder+'\animation_settings.csv')
         expected_frames = pd.read_csv(path+animation_folder+'\image_folder.csv')
+        #Note, turn expected_frames into a matrix.
         
         return impact_frame, start_frame, mass, expected_frames
     
@@ -61,21 +62,44 @@ class CNNModelConv(nn.Module):
     def __init__(self):
         super(CNNModelConv, self).__init__()
         self.conv1 = self.sequential_set(3, 576) #576 = 30*18 kernel_size divided!
+        self.conv2 = self.sequential_set(576, 1152) 
+        self.conv3 = self.sequential_set(1152, 2304)
+        self.ups1 = self.upsample_set(2304, 1152)
+        self.ups2= self.upsample_set(1152, 576)
+        self.ups3 = self.upsample_set(576, 150)
+        self.fc1 = nn.Linear(2304, 150)
+        self.fc2 = nn.Linear(150, 1)
         
         
     def sequential_set(self, in_c, out_c):
         conv = nn.Sequential(
             nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (5, 5, 3),padding=1, padding_mode='zeros'),
+            nn.BatchNorm3d(out_c),
             nn.Tanh(),
-            nn.MaxPool3d(3)
+            nn.MaxPool3d(kernel_size=3,padding=1, padding_mode='zeros')
         )
-        return conv  
+        return conv 
+    
+    def upsample_set(self, in_c, out_c):
+        conv = nn.Sequential(
+            nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (5, 5, 3),padding=1, padding_mode='zeros'),
+            nn.BatchNorm3d(out_c),
+            nn.Tanh(),
+            nn.MaxUnpool3d(kernel_size=3,padding=1, padding_mode='zeros')
+        )
+        return conv   
 
     def forward(self, x):
-        output = []
-
-
-        return output
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.fc1(x) # Double linear regression
+        x = self.fc2(x)
+        x = self.ups1(x)
+        x = self.ups2(x) 
+        x = self.ups2(x)       
+        
+        return x
 
 
 #Defining sets
