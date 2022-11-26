@@ -16,7 +16,6 @@ import gc
 
 import cv2
 
-
 T_LOWER = 50  # Lower Threshold
 T_UPPER = 150  # Upper threshold
 
@@ -62,7 +61,7 @@ class AnimationSet(Dataset):
 
         image = torch.stack([start_frame, impact_frame, mass_layer], 0)
 
-        # reading an edge detecting all frames in between
+        # reading and edge detecting all frames in between
         expected_frames = [0] * (first_impact-2)
         for i in range(0,first_impact-2):
             middle_frame = cv2.imread(os.path.join(path, animation_folder, frame_file.iloc[i+1].values.tolist()[0]))
@@ -71,7 +70,7 @@ class AnimationSet(Dataset):
 
         # this is all an example to show that, in the end, you can take the big tensor apart into a series of images
         # or heres hoping
-        # label = torch.stack(expected_frames)
+        label = torch.stack(expected_frames)
         # labelnd = label.cpu().detach().numpy()
         # testim = np.reshape(labelnd[0, :, :], (540, 960, 1))*255
         # cv2.imwrite('test.png', testim)
@@ -135,7 +134,7 @@ batch_size = 64
 
 animation = AnimationSet(
         data_folder = ls, #temporary, replace with actual working directory
-        data_folder_list = os.path.join(ls,'/nimation_list.csv')#Contains the list of animation folders
+        data_folder_list = os.path.join(ls,'animation_list.csv')#Contains the list of animation folders
     )
 
 train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
