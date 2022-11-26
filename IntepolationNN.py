@@ -1,43 +1,27 @@
+import os
+
 import torch
 from torch import nn
-import torchvision
-import torchvision.transforms as transforms
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 
-import os
+import torchvision
+import torchvision.transforms as transforms
+from torchvision.transforms import ToTensor
+from torchvision.io import read_image
+
 import pandas as pd # data processing with .csv
 import numpy as np # linear algebra if necessary?
 import gc
-from torchvision.io import read_image
-from torchvision.transforms import ToTensor
 
-# class AnimationSet(Dataset):
-#     def __init__(self, data_folder, img_folder, planar_location, threeD_location, 
-#                  impact_frames, planar_size):
-#         self.data_folder = data_folder
-#         self.img_fold = img_folder
-#         self.planar_location = planar_location
-#         self.threeD_location = threeD_location
-#         self.impact_frames = impact_frames
-#         self.planar_size = planar_size
-        
-#     def __len__(self):
-#         return len(self.planar_location)
-        
-#     def __getitem__(self, idx):
-#         imgPath = os.path.join(self.data_folder, self.img_folder, self.
-#                                )
-#         image = read_image(imgPath)
-#         label = self.planar_location.iloc[idx, 1]
-#         if self.transform:
-#             image = self.transform(image)
-#         if self.target_transform:
-#             label = self.target_transform(label)
-#         return image, label
+import cv2
 
-#Gets only the data_folder for the dataset, getItem does all the heavy lifting
+
+T_LOWER = 50  # Lower Threshold
+T_UPPER = 150  # Upper threshold
+
 class AnimationSet(Dataset):
+    # gathering the list of animations
     def __init__(self, data_folder, data_folder_list):
         self.data_folder = data_folder
         with open(data_folder_list, 'r') as f:
@@ -50,13 +34,49 @@ class AnimationSet(Dataset):
         path = os.path.join(self.data_folder)
         animation_folder = self.animations[idx]
         #Access start frame, impact frame, and mass of ball, use .csv to access
-        start_frame = ToTensor(read_image(transforms.Resize(160, 90)(path+animation_folder+'\image_folder.csv')))
-        impact_frame = ToTensor(read_image(transforms.Resize(160, 90)(path+animation_folder+'\impact_frames.csv')))
-        mass = torch.full((160,90),path+animation_folder+'\animation_settings.csv')
-        expected_frames = pd.read_csv(path+animation_folder+'\image_folder.csv')
-        #Note, turn expected_frames into a matrix.
+        frame_csv_location = os.path.join(path, animation_folder, 'frames_list.csv')
+        impact_csv_location = os.path.join(path, animation_folder, 'impact_frames.csv')
+        settings_csv_location = os.path.join(path, animation_folder, 'animation_settings.csv')
+
+        impact_file = pd.read_csv(impact_csv_location, header=None)
+        frame_file = pd.read_csv(frame_csv_location, header=None)
+        settings_file = pd.read_csv(settings_csv_location, header=None)
+
+        mass_value = settings_file.iloc[0].values.tolist()[3]
+        mass_layer = torch.full((1,540,960), mass_value)
+
+        first_impact = 0
+        image_transforms = transforms.ToTensor()
         
-        return impact_frame, start_frame, mass, expected_frames
+        first_impact = impact_file.iloc[0].values.tolist()[0]
+        
+        # reading and edge detecting start frame
+        start_frame_img = cv2.imread(os.path.join(path, animation_folder, frame_file.iloc[0].values.tolist()[0]))
+        start_frame_edges = cv2.Canny(start_frame_img, T_LOWER, T_UPPER)
+        start_frame = image_transforms(start_frame_edges)
+
+        # reading and edge detected end frame
+        impact_frame_img = cv2.imread(os.path.join(path, animation_folder, frame_file.iloc[first_impact].values.tolist()[0]))
+        impact_frame_edges = cv2.Canny(impact_frame_img, T_LOWER, T_UPPER)
+        impact_frame = image_transforms(impact_frame_edges)
+
+        image = torch.stack([start_frame, impact_frame, mass_layer], 0)
+
+        # reading an edge detecting all frames in between
+        expected_frames = [0] * (first_impact-2)
+        for i in range(0,first_impact-2):
+            middle_frame = cv2.imread(os.path.join(path, animation_folder, frame_file.iloc[i+1].values.tolist()[0]))
+            middle_frame_edges = cv2.Canny(middle_frame, T_LOWER, T_UPPER)
+            expected_frames[i] = image_transforms(middle_frame_edges)
+
+        # this is all an example to show that, in the end, you can take the big tensor apart into a series of images
+        # or heres hoping
+        # label = torch.stack(expected_frames)
+        # labelnd = label.cpu().detach().numpy()
+        # testim = np.reshape(labelnd[0, :, :], (540, 960, 1))*255
+        # cv2.imwrite('test.png', testim)
+
+        return image, label
     
 class CNNModelConv(nn.Module):
     def __init__(self):
@@ -76,7 +96,7 @@ class CNNModelConv(nn.Module):
             nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (5, 5, 3),padding=1, padding_mode='zeros'),
             nn.BatchNorm3d(out_c),
             nn.Tanh(),
-            nn.MaxPool3d(kernel_size=3,padding=1, padding_mode='zeros')
+            nn.MaxPool3d(kernel_size=3,padding=1)
         )
         return conv 
     
@@ -85,7 +105,7 @@ class CNNModelConv(nn.Module):
             nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (5, 5, 3),padding=1, padding_mode='zeros'),
             nn.BatchNorm3d(out_c),
             nn.Tanh(),
-            nn.MaxUnpool3d(kernel_size=3,padding=1, padding_mode='zeros')
+            nn.MaxUnpool3d(kernel_size=3,padding=1)
         )
         return conv   
 
@@ -105,7 +125,7 @@ class CNNModelConv(nn.Module):
 #Defining sets
 print(os.getcwd())
 #C:\Users\Alex\Desktop\ML Proj
-ls = os.getcwd()+'\Animations'
+ls = os.path.join(os.getcwd(),'animations')
 
 #Trains on 64 animation folders at a time
 batch_size = 64
@@ -115,8 +135,11 @@ batch_size = 64
 
 animation = AnimationSet(
         data_folder = ls, #temporary, replace with actual working directory
-        data_folder_list = ls+'\animation_list.csv'#Contains the list of animation folders
+        data_folder_list = os.path.join(ls,'/nimation_list.csv')#Contains the list of animation folders
     )
+
+train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
+test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
     
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model = CNNModelConv().to(device)
