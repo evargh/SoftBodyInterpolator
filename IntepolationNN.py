@@ -19,6 +19,8 @@ import cv2
 T_LOWER = 50  # Lower Threshold
 T_UPPER = 150  # Upper threshold
 
+TWO_SECOND_FRAME_COUNT = 24
+
 class AnimationSet(Dataset):
     # gathering the list of animations
     def __init__(self, data_folder, data_folder_list):
@@ -60,18 +62,25 @@ class AnimationSet(Dataset):
         impact_frame_edges = cv2.Canny(impact_frame_img, T_LOWER, T_UPPER)
         impact_frame = image_transforms(impact_frame_edges)
 
-        image = torch.stack([start_frame, impact_frame, mass_layer], 0)
+        image = torch.stack([start_frame, impact_frame, mass_layer], 1)
+
+        intermediate_frame_count = first_impact - 2
+        skip_value = intermediate_frame_count / TWO_SECOND_FRAME_COUNT
 
         # reading and edge detecting all frames in between
-        expected_frames = [0] * (first_impact-2)
-        for i in range(0,first_impact-2):
-            middle_frame = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[i+1].values.tolist()[0]))
-            middle_frame_edges = cv2.Canny(middle_frame, T_LOWER, T_UPPER)
+        # this tensor is also entirely booleans as a form of compression,
+        # since edges are either true or false
+        expected_frames = [0] * TWO_SECOND_FRAME_COUNT
+        for i in range(0,TWO_SECOND_FRAME_COUNT):
+            access_frame_idx = int(i*skip_value+.5+1)
+            middle_frame = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[access_frame_idx].values.tolist()[0]))
+            middle_frame_edges = np.array(cv2.Canny(middle_frame, T_LOWER, T_UPPER), dtype=bool)
+            print(type(middle_frame_edges))
             expected_frames[i] = image_transforms(middle_frame_edges)
 
         # this is all an example to show that, in the end, you can take the big tensor apart into a series of images
         # or heres hoping
-        label = torch.stack(expected_frames)
+        label = torch.stack(expected_frames, 1)
         # labelnd = label.cpu().detach().numpy()
         # testim = np.reshape(labelnd[0, :, :], (540, 960, 1))*255
         # cv2.imwrite('test.png', testim)
@@ -134,6 +143,8 @@ animation = AnimationSet(
         data_folder = ls, #temporary, replace with actual working directory
         data_folder_list = os.path.join(ls,'animation_list.csv')#Contains the list of animation folders
     )
+
+test, swet = animation.__getitem__(0)
 
 train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
 test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
