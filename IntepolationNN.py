@@ -45,7 +45,7 @@ class AnimationSet(Dataset):
         settings_file = pd.read_csv(settings_csv_location, header=None)
 
         mass_value = settings_file.iloc[0].values.tolist()[3]
-        mass_layer = torch.full((1,540,960), mass_value)
+        mass_layer = torch.full((1,54,96), mass_value) #Resizing images for the sake of my RAM not dying input resize by 10
 
         first_impact = 0
         image_transforms = transforms.ToTensor()
@@ -55,11 +55,13 @@ class AnimationSet(Dataset):
         # reading and edge detecting start frame
         start_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[0].values.tolist()[0]))
         start_frame_edges = cv2.Canny(start_frame_img, T_LOWER, T_UPPER)
+        start_frame_edges = cv2.resize(start_frame_edges, dsize= [96, 54])
         start_frame = image_transforms(start_frame_edges)
 
         # reading and edge detected end frame
         impact_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[first_impact].values.tolist()[0]))
         impact_frame_edges = cv2.Canny(impact_frame_img, T_LOWER, T_UPPER)
+        impact_frame_edges = cv2.resize(impact_frame_edges, dsize= [96, 54])
         impact_frame = image_transforms(impact_frame_edges)
 
         image = torch.stack([start_frame, impact_frame, mass_layer], 1)
@@ -74,8 +76,8 @@ class AnimationSet(Dataset):
         for i in range(0,TWO_SECOND_FRAME_COUNT):
             access_frame_idx = int(i*skip_value+.5+1)
             middle_frame = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[access_frame_idx].values.tolist()[0]))
-            middle_frame_edges = np.array(cv2.Canny(middle_frame, T_LOWER, T_UPPER), dtype=bool)
-            print(type(middle_frame_edges))
+            middle_frame_edges = np.array(cv2.Canny(middle_frame, T_LOWER, T_UPPER), dtype=float)
+            #print(type(middle_frame_edges))
             expected_frames[i] = image_transforms(middle_frame_edges)
 
         # this is all an example to show that, in the end, you can take the big tensor apart into a series of images
@@ -84,15 +86,17 @@ class AnimationSet(Dataset):
         # labelnd = label.cpu().detach().numpy()
         # testim = np.reshape(labelnd[0, :, :], (540, 960, 1))*255
         # cv2.imwrite('test.png', testim)
+        
+        #print(torch.Tensor.size(image), torch.Tensor.size(label))
 
         return image, label
     
 class CNNModelConv(nn.Module):
     def __init__(self):
         super(CNNModelConv, self).__init__()
-        self.conv1 = self.sequential_set(3, 3) #576 = 30*18 kernel_size divided!
+        self.conv1 = self.sequential_set(1, 64)
         #self.conv2 = self.sequential_set(15, 45) 
-        self.ups1 = self.upsample_set(3,3)
+        self.ups1 = self.upsample_set(64,1)
         #self.ups2 = self.upsample_set(75, 150)
         #self.flatten = nn.Flatten()
         #self.fc1 = nn.Linear(45, 15)
@@ -101,21 +105,22 @@ class CNNModelConv(nn.Module):
         
     def sequential_set(self, in_c, out_c):
         conv = nn.Sequential(
-            nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (3, 3, 3), padding=1, stride=1, padding_mode='zeros'),
+            nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (1, 3, 3), padding=0, stride=1, padding_mode='zeros'),
             nn.BatchNorm3d(out_c),
             nn.Tanh(),
             nn.MaxPool3d(kernel_size=(3, 3, 3),padding=1)
         )
+
         return conv 
     
     def upsample_set(self, in_c, out_c):
         conv = nn.Sequential(
-            nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (3, 3, 3), padding=1, stride=3, padding_mode='zeros'),
+            nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (1, 3, 3), padding=0, stride=3, padding_mode='zeros'),
             nn.BatchNorm3d(out_c),
             nn.Tanh(),
-            nn.Upsample(scale_factor=3)
+            nn.Upsample(scale_factor=(24,90,96))
         )
-        print(conv)
+        #print(conv)
         return conv   
 
     def forward(self, x):
