@@ -36,6 +36,7 @@ class AnimationSet(Dataset):
         frame_csv_location = os.path.join(path, animation_folder, 'frames_list.csv')
         impact_csv_location = os.path.join(path, animation_folder, 'impact_frames.csv')
         settings_csv_location = os.path.join(path, animation_folder, 'animation_settings.csv')
+        frames_location = os.path.join(path, animation_folder, 'frames')
 
         impact_file = pd.read_csv(impact_csv_location, header=None)
         frame_file = pd.read_csv(frame_csv_location, header=None)
@@ -50,12 +51,12 @@ class AnimationSet(Dataset):
         first_impact = impact_file.iloc[0].values.tolist()[0]
         
         # reading and edge detecting start frame
-        start_frame_img = cv2.imread(os.path.join(path, animation_folder, frame_file.iloc[0].values.tolist()[0]))
+        start_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[0].values.tolist()[0]))
         start_frame_edges = cv2.Canny(start_frame_img, T_LOWER, T_UPPER)
         start_frame = image_transforms(start_frame_edges)
 
         # reading and edge detected end frame
-        impact_frame_img = cv2.imread(os.path.join(path, animation_folder, frame_file.iloc[first_impact].values.tolist()[0]))
+        impact_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[first_impact].values.tolist()[0]))
         impact_frame_edges = cv2.Canny(impact_frame_img, T_LOWER, T_UPPER)
         impact_frame = image_transforms(impact_frame_edges)
 
@@ -64,7 +65,7 @@ class AnimationSet(Dataset):
         # reading and edge detecting all frames in between
         expected_frames = [0] * (first_impact-2)
         for i in range(0,first_impact-2):
-            middle_frame = cv2.imread(os.path.join(path, animation_folder, frame_file.iloc[i+1].values.tolist()[0]))
+            middle_frame = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[i+1].values.tolist()[0]))
             middle_frame_edges = cv2.Canny(middle_frame, T_LOWER, T_UPPER)
             expected_frames[i] = image_transforms(middle_frame_edges)
 
@@ -80,43 +81,40 @@ class AnimationSet(Dataset):
 class CNNModelConv(nn.Module):
     def __init__(self):
         super(CNNModelConv, self).__init__()
-        self.conv1 = self.sequential_set(3, 576) #576 = 30*18 kernel_size divided!
-        self.conv2 = self.sequential_set(576, 1152) 
-        self.conv3 = self.sequential_set(1152, 2304)
-        self.ups1 = self.upsample_set(2304, 1152)
-        self.ups2= self.upsample_set(1152, 576)
-        self.ups3 = self.upsample_set(576, 150)
-        self.fc1 = nn.Linear(2304, 150)
-        self.fc2 = nn.Linear(150, 1)
+        self.conv1 = self.sequential_set(3, 3) #576 = 30*18 kernel_size divided!
+        #self.conv2 = self.sequential_set(15, 45) 
+        self.ups1 = self.upsample_set(3,3)
+        #self.ups2 = self.upsample_set(75, 150)
+        #self.flatten = nn.Flatten()
+        #self.fc1 = nn.Linear(45, 15)
+        #self.fc2 = nn.Linear(15, 1)
         
         
     def sequential_set(self, in_c, out_c):
         conv = nn.Sequential(
-            nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (5, 5, 3),padding=1, padding_mode='zeros'),
+            nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (3, 3, 3), padding=1, stride=1, padding_mode='zeros'),
             nn.BatchNorm3d(out_c),
             nn.Tanh(),
-            nn.MaxPool3d(kernel_size=3,padding=1)
+            nn.MaxPool3d(kernel_size=(3, 3, 3),padding=1)
         )
         return conv 
     
     def upsample_set(self, in_c, out_c):
         conv = nn.Sequential(
-            nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (5, 5, 3),padding=1, padding_mode='zeros'),
+            nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (3, 3, 3), padding=1, stride=3, padding_mode='zeros'),
             nn.BatchNorm3d(out_c),
             nn.Tanh(),
-            nn.MaxUnpool3d(kernel_size=3,padding=1)
+            nn.Upsample(scale_factor=3)
         )
+        print(conv)
         return conv   
 
     def forward(self, x):
         x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.conv3(x)
-        x = self.fc1(x) # Double linear regression
-        x = self.fc2(x)
+        #x = self.conv2(x)
+        #x = self.flatten(x)
         x = self.ups1(x)
-        x = self.ups2(x) 
-        x = self.ups2(x)       
+        #x = self.ups2(x) 
         
         return x
 
@@ -142,61 +140,65 @@ test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
     
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model = CNNModelConv().to(device)
-optimizer = torch.optim.RMSprop(model.parameters, lr=1e-5)
+optimizer = torch.optim.RMSprop(model.parameters(), lr=1e-5)
 criterion = nn.MSELoss()
 
 train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
 test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
+print("after")
+
+
     
 def trainer():
+    print("entered trainer\n")
     #Default Trainer
     model.train()
     
-    for epoch in range(500):
+    running_loss = 0.0
+    for idx, data in enumerate(train_dataloader, 0):
+        inputs, labels = data
+        inputs, labels = inputs.to(device), labels.to(device)
+    
+        # zero the parameter gradients
+        optimizer.zero_grad()
+    
+        # forward + backward + optimize
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+    
+        running_loss += loss.item()
+        print('Training Loss: {}'.format(running_loss))
+    print('Finished Training')
+
+def validation():
+    print("entered validation\n")
+    
+    model.eval()
+    with torch.no_grad():
         running_loss = 0.0
-        for i, data in enumerate(train_dataloader, 0):
+        for idx, data in enumerate(test_dataloader, 0):
             inputs, labels = data
             inputs, labels = inputs.to(device), labels.to(device)
-    
+        
             # zero the parameter gradients
             optimizer.zero_grad()
-    
+        
             # forward + backward + optimize
             outputs = model(inputs)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-    
+        
             running_loss += loss.item()
-            gc.collect() #Garbage Collection
-    
-        print('Training Loss: {}'.format(running_loss))
-    print('Finished Training')
-
-def validation():
-    
-    model.eval()
-    with torch.no_grad():
-        for epoch in range(500):
-            running_loss = 0.0
-            for i, data in enumerate(test_dataloader, 0):
-                inputs, labels = data
-                inputs, labels = inputs.to(device), labels.to(device)
-        
-                # zero the parameter gradients
-                optimizer.zero_grad()
-        
-                # forward + backward + optimize
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                loss.backward()
-                optimizer.step()
-        
-                running_loss += loss.item()
-                gc.collect() #Garbage Collection
-            print('Validation Loss: {}'.format(running_loss))
-            
+        print('Validation Loss: {}'.format(running_loss))   
     print('Finished Validating')
     
 
-
+epochs = 500
+for epoch in range(epochs):
+    print('epoch {}/{}'.format(epoch+1,epochs))
+    trainer()
+    validation()
+    gc.collect()
