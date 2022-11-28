@@ -55,13 +55,11 @@ class AnimationSet(Dataset):
         # reading and edge detecting start frame
         start_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[0].values.tolist()[0]))
         start_frame_edges = cv2.Canny(start_frame_img, T_LOWER, T_UPPER)
-        start_frame_edges = cv2.resize(start_frame_edges, dsize= [96, 54])
         start_frame = image_transforms(start_frame_edges)
 
         # reading and edge detected end frame
         impact_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[first_impact].values.tolist()[0]))
         impact_frame_edges = cv2.Canny(impact_frame_img, T_LOWER, T_UPPER)
-        impact_frame_edges = cv2.resize(impact_frame_edges, dsize= [96, 54])
         impact_frame = image_transforms(impact_frame_edges)
 
         image = torch.stack([start_frame, impact_frame, mass_layer], 1)
@@ -139,7 +137,7 @@ print(os.getcwd())
 ls = os.path.join(os.getcwd(),'animations')
 
 #Trains on 64 animation folders at a time
-batch_size = 64
+batch_size = 1
 
 #Iterate over every folder in the working directory ls
 #Store all animation sets in animations array
@@ -149,7 +147,7 @@ animation = AnimationSet(
         data_folder_list = os.path.join(ls,'animation_list.csv')#Contains the list of animation folders
     )
 
-test, swet = animation.__getitem__(0)
+#test, swet = animation.__getitem__(0)
 
 train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
 test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
@@ -162,7 +160,6 @@ criterion = nn.MSELoss()
 train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
 test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
 print("after")
-
 
     
 def trainer():
