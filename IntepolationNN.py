@@ -54,12 +54,12 @@ class AnimationSet(Dataset):
         
         # reading and edge detecting start frame
         start_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[0].values.tolist()[0]))
-        start_frame_edges = cv2.Canny(start_frame_img, T_LOWER, T_UPPER)
+        start_frame_edges = cv2.resize(cv2.Canny(start_frame_img, T_LOWER, T_UPPER), (96, 54))
         start_frame = image_transforms(start_frame_edges)
 
         # reading and edge detected end frame
         impact_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[first_impact].values.tolist()[0]))
-        impact_frame_edges = cv2.Canny(impact_frame_img, T_LOWER, T_UPPER)
+        impact_frame_edges = cv2.resize(cv2.Canny(impact_frame_img, T_LOWER, T_UPPER), (96, 54))
         impact_frame = image_transforms(impact_frame_edges)
 
         image = torch.stack([start_frame, impact_frame, mass_layer], 1)
@@ -74,7 +74,7 @@ class AnimationSet(Dataset):
         for i in range(0,TWO_SECOND_FRAME_COUNT):
             access_frame_idx = int(i*skip_value+.5+1)
             middle_frame = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[access_frame_idx].values.tolist()[0]))
-            middle_frame_edges = np.array(cv2.Canny(middle_frame, T_LOWER, T_UPPER), dtype=float)
+            middle_frame_edges = cv2.resize(cv2.Canny(middle_frame, T_LOWER, T_UPPER), (96, 54))
             #print(type(middle_frame_edges))
             expected_frames[i] = image_transforms(middle_frame_edges)
 
@@ -116,7 +116,7 @@ class CNNModelConv(nn.Module):
             nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (1, 3, 3), padding=0, stride=3, padding_mode='zeros'),
             nn.BatchNorm3d(out_c),
             nn.Tanh(),
-            nn.Upsample(scale_factor=(24,90,96))
+            nn.Upsample(scale_factor=(24,9,9.6))
         )
         #print(conv)
         return conv   
@@ -200,11 +200,6 @@ def validation():
         
             # forward + backward + optimize
             outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-        
-            running_loss += loss.item()
         print('Validation Loss: {}'.format(running_loss))   
     print('Finished Validating')
     
