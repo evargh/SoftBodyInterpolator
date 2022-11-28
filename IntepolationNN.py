@@ -19,6 +19,9 @@ import cv2
 T_LOWER = 50  # Lower Threshold
 T_UPPER = 150  # Upper threshold
 
+IM_HEIGHT = 270
+IM_WIDTH = 480
+
 TWO_SECOND_FRAME_COUNT = 24
 
 class AnimationSet(Dataset):
@@ -45,7 +48,7 @@ class AnimationSet(Dataset):
         settings_file = pd.read_csv(settings_csv_location, header=None)
 
         mass_value = settings_file.iloc[0].values.tolist()[3]
-        mass_layer = torch.full((1,54,96), mass_value) #Resizing images for the sake of my RAM not dying input resize by 10
+        mass_layer = torch.full((1,IM_HEIGHT,IM_WIDTH), mass_value) #Resizing images for the sake of my RAM not dying input resize by 10
 
         first_impact = 0
         image_transforms = transforms.ToTensor()
@@ -54,12 +57,12 @@ class AnimationSet(Dataset):
         
         # reading and edge detecting start frame
         start_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[0].values.tolist()[0]))
-        start_frame_edges = cv2.resize(cv2.Canny(start_frame_img, T_LOWER, T_UPPER), (96, 54))
+        start_frame_edges = cv2.resize(cv2.Canny(start_frame_img, T_LOWER, T_UPPER), (IM_WIDTH, IM_HEIGHT))
         start_frame = image_transforms(start_frame_edges)
 
         # reading and edge detected end frame
         impact_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[first_impact].values.tolist()[0]))
-        impact_frame_edges = cv2.resize(cv2.Canny(impact_frame_img, T_LOWER, T_UPPER), (96, 54))
+        impact_frame_edges = cv2.resize(cv2.Canny(impact_frame_img, T_LOWER, T_UPPER), (IM_WIDTH, IM_HEIGHT))
         impact_frame = image_transforms(impact_frame_edges)
 
         image = torch.stack([start_frame, impact_frame, mass_layer], 1)
@@ -74,7 +77,7 @@ class AnimationSet(Dataset):
         for i in range(0,TWO_SECOND_FRAME_COUNT):
             access_frame_idx = int(i*skip_value+.5+1)
             middle_frame = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[access_frame_idx].values.tolist()[0]))
-            middle_frame_edges = cv2.resize(cv2.Canny(middle_frame, T_LOWER, T_UPPER), (96, 54))
+            middle_frame_edges = cv2.resize(cv2.Canny(middle_frame, T_LOWER, T_UPPER), (IM_WIDTH, IM_HEIGHT))
             #print(type(middle_frame_edges))
             expected_frames[i] = image_transforms(middle_frame_edges)
 
@@ -116,7 +119,7 @@ class CNNModelConv(nn.Module):
             nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (1, 3, 3), padding=0, stride=3, padding_mode='zeros'),
             nn.BatchNorm3d(out_c),
             nn.Tanh(),
-            nn.Upsample(scale_factor=(24,9,9.6))
+            nn.Upsample(scale_factor=(24,9,9.07))
         )
         #print(conv)
         return conv   
@@ -181,8 +184,7 @@ def trainer():
         loss.backward()
         optimizer.step()
     
-        running_loss += loss.item()
-        print('Training Loss: {}'.format(running_loss))
+        print('Training Loss: {}'.format(loss.item()))
     print('Finished Training')
 
 def validation():
@@ -202,9 +204,17 @@ def validation():
             outputs = model(inputs)
         print('Validation Loss: {}'.format(running_loss))   
     print('Finished Validating')
+
+    # TODO: write each frame to a file
+    outputnd = outputs.cpu().detach().numpy()
+    labelnd = labels.cpu().detach().numpy()
+    outputtest = np.reshape(outputnd[0, 0, 0, :, :], (IM_HEIGHT, IM_WIDTH, 1))*255
+    labeltest = np.reshape(labelnd[0, 0, 0, :, :], (IM_HEIGHT, IM_WIDTH, 1))*255
+    cv2.imwrite('output.png', outputtest)
+    cv2.imwrite('label.png', labeltest)
     
 
-epochs = 500
+epochs = 20
 for epoch in range(epochs):
     print('epoch {}/{}'.format(epoch+1,epochs))
     trainer()
