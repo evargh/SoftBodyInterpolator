@@ -151,20 +151,18 @@ animation = AnimationSet(
     )
 
 #test, swet = animation.__getitem__(0)
-
-train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
-test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
     
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model = CNNModelConv().to(device)
 optimizer = torch.optim.RMSprop(model.parameters(), lr=1e-5)
 criterion = nn.MSELoss()
 
-train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
-test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=False)
-print("after")
+train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=True)
+test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=True)
 
-    
+train_losses = []
+valid_losses = []
+
 def trainer():
     print("entered trainer\n")
     #Default Trainer
@@ -183,8 +181,11 @@ def trainer():
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
+        running_loss += loss
     
-        print('Training Loss: {}'.format(loss.item()))
+    train_loss = running_loss/len(train_dataloader)
+    train_losses.append(train_loss)
+    print('Training Loss: {}'.format(train_loss))
     print('Finished Training')
 
 def validation():
@@ -202,7 +203,11 @@ def validation():
         
             # forward + backward + optimize
             outputs = model(inputs)
-        print('Validation Loss: {}'.format(running_loss))   
+            loss = criterion(outputs, labels)
+            running_loss += loss   
+        valid_loss = running_loss/len(test_dataloader)
+        valid_losses.append(valid_loss)  
+        print('Validation Loss: {}'.format(valid_loss))  
     print('Finished Validating')
 
     # TODO: write each frame to a file
