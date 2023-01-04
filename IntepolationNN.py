@@ -7,11 +7,10 @@ from torch.utils.data import DataLoader
 
 import torchvision
 import torchvision.transforms as transforms
-from torchvision.transforms import ToTensor
 from torchvision.io import read_image
 
-import pandas as pd # data processing with .csv
-import numpy as np # linear algebra if necessary?
+import pandas as pd
+import numpy as np
 import gc
 
 import cv2
@@ -33,7 +32,9 @@ class AnimationSet(Dataset):
         
     def __len__(self):
         return len(self.animations)
-        
+    
+
+    # TODO: Log full first appearance of the ball by seeing when both "ends" are in camera view
     def __getitem__(self, idx):
         path = os.path.join(self.data_folder)
         animation_folder = self.animations[idx]
@@ -56,91 +57,133 @@ class AnimationSet(Dataset):
         first_impact = impact_file.iloc[0].values.tolist()[0]
         
         # reading and edge detecting start frame
-        start_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[0].values.tolist()[0]))
-        start_frame_edges = cv2.resize(cv2.Canny(start_frame_img, T_LOWER, T_UPPER), (IM_WIDTH, IM_HEIGHT))
+        start_frame_loc = os.path.join(path, frames_location, frame_file.iloc[0].values.tolist()[0])
+        start_frame_img = cv2.imread(start_frame_loc)
+        start_frame_edges = cv2.cvtColor(start_frame_img, cv2.COLOR_BGR2GRAY)
+        start_frame_edges = cv2.resize(start_frame_edges, (IM_WIDTH, IM_HEIGHT))
+        start_frame_edges = cv2.threshold(start_frame_edges, 50, 255, cv2.THRESH_BINARY)[1]
+        #start_frame_edges = np.subtract(start_frame_edges, start_frame_edges.max())
         start_frame = image_transforms(start_frame_edges)
 
         # reading and edge detected end frame
-        impact_frame_img = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[first_impact].values.tolist()[0]))
-        impact_frame_edges = cv2.resize(cv2.Canny(impact_frame_img, T_LOWER, T_UPPER), (IM_WIDTH, IM_HEIGHT))
+        # need to find the position of the impact even with any deleted frames
+        indexer_list = np.reshape(frame_file.iloc[:].values.tolist(), (len(frame_file.iloc[:].values.tolist())))
+        filename = 'f{val}.png'.format(val=first_impact)
+        realspot = indexer_list.tolist().index(filename)
+        # get the index of the first impact and pass that to frame_file.iloc
+
+        impact_frame_loc = os.path.join(path, frames_location, frame_file.iloc[realspot].values.tolist()[0])
+        impact_frame_img = cv2.imread(impact_frame_loc)
+        impact_frame_edges = cv2.cvtColor(impact_frame_img, cv2.COLOR_BGR2GRAY)
+        impact_frame_edges = cv2.resize(impact_frame_edges, (IM_WIDTH, IM_HEIGHT))
+        impact_frame_edges = cv2.threshold(impact_frame_edges, 50, 255, cv2.THRESH_BINARY)[1]
+        #impact_frame_edges = np.subtract(impact_frame_edges, impact_frame_edges.max())*-1
         impact_frame = image_transforms(impact_frame_edges)
 
-        image = torch.stack([start_frame, impact_frame, mass_layer], 1)
+        image = torch.squeeze(torch.stack([start_frame, impact_frame, mass_layer], 1))
 
         intermediate_frame_count = first_impact - 2
         skip_value = intermediate_frame_count / TWO_SECOND_FRAME_COUNT
+
+        firstpoint = int(frame_file.iloc[0].values.tolist()[0].split(".")[0][1:])
 
         # reading and edge detecting all frames in between
         # this tensor is also entirely booleans as a form of compression,
         # since edges are either true or false
         expected_frames = [0] * TWO_SECOND_FRAME_COUNT
         for i in range(0,TWO_SECOND_FRAME_COUNT):
-            access_frame_idx = int(i*skip_value+.5+1)
-            middle_frame = cv2.imread(os.path.join(path, frames_location, frame_file.iloc[access_frame_idx].values.tolist()[0]))
-            middle_frame_edges = cv2.resize(cv2.Canny(middle_frame, T_LOWER, T_UPPER), (IM_WIDTH, IM_HEIGHT))
+            access_frame_idx = int(i*skip_value+.5+1 + firstpoint)
+            filename = 'f{val}.png'.format(val=access_frame_idx)
+            realspot = indexer_list.tolist().index(filename)
+
+            middle_frame_loc = os.path.join(path, frames_location, frame_file.iloc[realspot].values.tolist()[0])
+            middle_frame_img = cv2.imread(middle_frame_loc)
+            middle_frame_edges = cv2.cvtColor(middle_frame_img, cv2.COLOR_BGR2GRAY)
+            middle_frame_edges = cv2.resize(middle_frame_edges, (IM_WIDTH, IM_HEIGHT))
+            middle_frame_edges = cv2.threshold(middle_frame_edges, 50, 255, cv2.THRESH_BINARY)[1]
             #print(type(middle_frame_edges))
             expected_frames[i] = image_transforms(middle_frame_edges)
 
         # this is all an example to show that, in the end, you can take the big tensor apart into a series of images
         # or heres hoping
-        label = torch.stack(expected_frames, 1)
-        # labelnd = label.cpu().detach().numpy()
-        # testim = np.reshape(labelnd[0, :, :], (540, 960, 1))*255
-        # cv2.imwrite('test.png', testim)
+        label = torch.squeeze(torch.stack(expected_frames, 1))
+        labelnd = label.cpu().detach().numpy()
+        testim = np.reshape(labelnd[0, :, :], (IM_HEIGHT, IM_WIDTH))
+        cv2.imwrite('test.png', testim)
         
         #print(torch.Tensor.size(image), torch.Tensor.size(label))
 
         return image, label
     
-class CNNModelConv(nn.Module):
-    def __init__(self):
-        super(CNNModelConv, self).__init__()
-        self.conv1 = self.sequential_set(1, 64)
-        #self.conv2 = self.sequential_set(15, 45) 
-        self.ups1 = self.upsample_set(64,1)
-        #self.ups2 = self.upsample_set(75, 150)
-        #self.flatten = nn.Flatten()
-        #self.fc1 = nn.Linear(45, 15)
-        #self.fc2 = nn.Linear(15, 1)
-        
-        
-    def sequential_set(self, in_c, out_c):
-        conv = nn.Sequential(
-            nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (1, 3, 3), padding=0, stride=1, padding_mode='zeros'),
-            nn.BatchNorm3d(out_c),
-            nn.Tanh(),
-            nn.MaxPool3d(kernel_size=(3, 3, 3),padding=1)
+class Encoder_Decoder(nn.Module):
+    def __init__(self, batch, encoded_space_dim):
+        super().__init__()
+
+        ### Convolutional section
+        self.encoder_cnn = nn.Sequential(
+            nn.Conv3d(batch, 16, 3, stride=2, padding=1),
+            nn.ReLU(True),
+            nn.Conv3d(16, 32, 3, stride=2, padding=1),
+            nn.BatchNorm2d(1),
+            nn.ReLU(True),
+            nn.Conv3d(32, 64, (1, 3, 3), stride=2, padding=0),
+            nn.ReLU(True)
         )
 
-        return conv 
-    
-    def upsample_set(self, in_c, out_c):
-        conv = nn.Sequential(
-            nn.Conv3d(in_channels=in_c, out_channels=out_c, kernel_size= (1, 3, 3), padding=0, stride=3, padding_mode='zeros'),
-            nn.BatchNorm3d(out_c),
-            nn.Tanh(),
-            nn.Upsample(scale_factor=(24,9,9.07))
+        ### Flatten layer
+        self.flatten = nn.Flatten(start_dim=1)
+        ### Linear section
+        self.encoder_lin = nn.Sequential(
+            nn.Linear(33*59, 128),
+            nn.ReLU(True),
+            nn.Linear(128, encoded_space_dim)
         )
-        #print(conv)
-        return conv   
+
+        self.decoder_lin = nn.Sequential(
+            nn.Linear(encoded_space_dim, 128),
+            nn.ReLU(True),
+            nn.Linear(128, 33*59),
+            nn.ReLU(True)
+        )
+
+        self.unflatten = nn.Unflatten(dim=1,
+        unflattened_size=(1, 33, 59))
+
+        self.decoder_conv = nn.Sequential(
+            nn.ConvTranspose3d(64, 32, (5, 3, 3),
+            stride=2, output_padding=(1, 0, 1)),
+            nn.BatchNorm2d(6),
+            nn.ReLU(True),
+            nn.ConvTranspose3d(32, 16, 3, stride=2,
+            padding=1, output_padding=(0, 1, 0)),
+            nn.BatchNorm2d(11),
+            nn.ReLU(True),
+            nn.ConvTranspose3d(16, batch, 3, stride=2,
+            padding=0, output_padding=1)
+        )
 
     def forward(self, x):
-        x = self.conv1(x)
-        #x = self.conv2(x)
-        #x = self.flatten(x)
-        x = self.ups1(x)
-        #x = self.ups2(x) 
-        
+        acts = []
+
+        x = self.encoder_cnn(x)
+        acts.append(x)
+        x = self.flatten(x)
+        acts.append(x)
+        x = self.encoder_lin(x)
+        acts.append(x)
+
+        x = x + acts[2]
+        x = self.decoder_lin(x)
+        x = x + acts[1]
+        x = self.unflatten(x)
+        x = x + acts[0]
+        x = self.decoder_conv(x)
         return x
 
-
-#Defining sets
-print(os.getcwd())
-#C:\Users\Alex\Desktop\ML Proj
 ls = os.path.join(os.getcwd(),'animations')
 
 #Trains on 64 animation folders at a time
-batch_size = 1
+batch_size = 16
 
 #Iterate over every folder in the working directory ls
 #Store all animation sets in animations array
@@ -150,78 +193,78 @@ animation = AnimationSet(
         data_folder_list = os.path.join(ls,'animation_list.csv')#Contains the list of animation folders
     )
 
-#test, swet = animation.__getitem__(0)
-    
+m=int(len(animation)*.8)
+train_set, test_set = torch.utils.data.random_split(animation, [m, len(animation)-m])
+
+train_dataloader = DataLoader(train_set, batch_size=batch_size, shuffle=True, drop_last=True)
+test_dataloader = DataLoader(test_set, batch_size=batch_size, shuffle=True, drop_last = True)
+
+encoder_decoder = Encoder_Decoder(batch=batch_size, encoded_space_dim=32)
+params_to_optimize = [
+    {'params': encoder_decoder.parameters()},
+]
+
+optim = torch.optim.Adam(params_to_optimize, lr=0.001, weight_decay=1e-05)
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model = CNNModelConv().to(device)
-optimizer = torch.optim.RMSprop(model.parameters(), lr=1e-5)
-criterion = nn.MSELoss()
+encoder_decoder.to(device)
 
-train_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=True)
-test_dataloader = DataLoader(animation, batch_size=batch_size, shuffle=True)
+def train_epoch(encoder, device, dataloader, loss_fn, optimizer):
+    # Set train mode for both the encoder and the decoder
+    encoder.train()
+    train_loss = []
 
-train_losses = []
-valid_losses = []
+    for image_batch, label_batch in dataloader:
+        image_batch = image_batch.to(device)
+        encoded_decoded_data = encoder(image_batch)
+        loss = loss_fn(encoded_decoded_data, label_batch)
 
-def trainer():
-    print("entered trainer\n")
-    #Default Trainer
-    model.train()
-    
-    running_loss = 0.0
-    for idx, data in enumerate(train_dataloader, 0):
-        inputs, labels = data
-        inputs, labels = inputs.to(device), labels.to(device)
-    
-        # zero the parameter gradients
         optimizer.zero_grad()
-    
-        # forward + backward + optimize
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
-        running_loss += loss
-    
-    train_loss = running_loss/len(train_dataloader)
-    train_losses.append(train_loss)
-    print('Training Loss: {}'.format(train_loss))
-    print('Finished Training')
 
-def validation():
-    print("entered validation\n")
-    
-    model.eval()
+        print('\t partial train loss (single batch): %f' % (loss.data))
+        train_loss.append(loss.detach().cpu().numpy())
+
+    return np.mean(train_loss)
+
+### Testing function
+def test_epoch(encoder, device, dataloader, loss_fn):
+    # Set evaluation mode for encoder and decoder
+    encoder.eval()
     with torch.no_grad():
-        running_loss = 0.0
-        for idx, data in enumerate(test_dataloader, 0):
-            inputs, labels = data
-            inputs, labels = inputs.to(device), labels.to(device)
-        
-            # zero the parameter gradients
-            optimizer.zero_grad()
-        
-            # forward + backward + optimize
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            running_loss += loss   
-        valid_loss = running_loss/len(test_dataloader)
-        valid_losses.append(valid_loss)  
-        print('Validation Loss: {}'.format(valid_loss))  
-    print('Finished Validating')
+        conc_out = []
+        conc_label = []
+        for image_batch, label_batch in dataloader:
+            image_batch = image_batch.to(device)
+            encoded_decoded_data = encoder(image_batch)
 
-    # TODO: write each frame to a file
-    outputnd = outputs.cpu().detach().numpy()
-    labelnd = labels.cpu().detach().numpy()
-    outputtest = np.reshape(outputnd[0, 0, 0, :, :], (IM_HEIGHT, IM_WIDTH, 1))*255
-    labeltest = np.reshape(labelnd[0, 0, 0, :, :], (IM_HEIGHT, IM_WIDTH, 1))*255
-    cv2.imwrite('output.png', outputtest)
-    cv2.imwrite('label.png', labeltest)
+            conc_out.append(encoded_decoded_data.cpu())
+            conc_label.append(label_batch.cpu())
+
+            # TODO: write each frame to a file
+            outputnd = encoded_decoded_data.cpu().detach().numpy()
+            labelnd = label_batch.cpu().detach().numpy()
+            outputtest = (np.reshape(outputnd[0, 12, :, :], (IM_HEIGHT, IM_WIDTH))*255).astype(int)
+            labeltest = (np.reshape(labelnd[0, 12, :, :], (IM_HEIGHT, IM_WIDTH))*255).astype(int)
+            cv2.imwrite('output.png', outputtest)
+            cv2.imwrite('label.png', labeltest)
+
+        conc_out = torch.cat(conc_out)
+        conc_label = torch.cat(conc_label) 
+
+        val_loss = loss_fn(conc_out, conc_label)
+    return val_loss.data
     
+loss_fn = torch.nn.L1Loss()
 
-epochs = 20
-for epoch in range(epochs):
-    print('epoch {}/{}'.format(epoch+1,epochs))
-    trainer()
-    validation()
-    gc.collect()
+num_epochs = 10
+diz_loss = {'train_loss':[],'val_loss':[]}
+for epoch in range(num_epochs):
+    train_loss = train_epoch(encoder_decoder,device,train_dataloader,loss_fn,optim)
+    val_loss = test_epoch(encoder_decoder,device,test_dataloader,loss_fn)
+    print('\n EPOCH {}/{} \t train loss {} \t val loss {}'.format(epoch + 1, num_epochs,train_loss,val_loss))
+    diz_loss['train_loss'].append(train_loss)
+    diz_loss['val_loss'].append(val_loss)
+
+    
